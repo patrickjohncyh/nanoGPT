@@ -117,8 +117,8 @@ class Noether(nn.Module):
             tailor_idx = torch.ones(bs) * seq_len
 
         invalid = [
-            # "wte",
-            # "wpe",
+            "wte",
+            "wpe",
         ]
         # get model params and repeat bs times
         params = {
@@ -137,6 +137,7 @@ class Noether(nn.Module):
         # convert tailor_idx to attention_mask
         range_tensor = torch.arange(ids.size(1), device=device).unsqueeze(0)
         tailor_idx = tailor_idx.unsqueeze(1)
+        tailor_idx = tailor_idx.unsqueeze(1).to(device)
         attention_mask = (range_tensor < tailor_idx).bool()
 
         for i in range(self.inner_steps):
