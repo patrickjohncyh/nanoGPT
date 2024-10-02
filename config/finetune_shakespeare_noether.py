@@ -4,7 +4,7 @@ is_noether = True
 inner_lr = 1e-5
 inner_steps = 1
 
-out_dir = "out-shakespeare"
+out_dir = "out-shakespeare-noether"
 eval_interval = 5
 eval_iters = 40
 wandb_log = False  # feel free to turn on
