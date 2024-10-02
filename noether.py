@@ -197,7 +197,12 @@ class Noether(nn.Module):
         the sequence max_new_tokens times, feeding the predictions back into the model each time.
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
+        inner_steps = self.inner_steps
         for _ in range(max_new_tokens):
+            if _ < 10:
+                self.inner_steps = 0
+            else:
+                self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = (
                 idx
