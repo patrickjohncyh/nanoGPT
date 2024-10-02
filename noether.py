@@ -136,7 +136,6 @@ class Noether(nn.Module):
 
         # convert tailor_idx to attention_mask
         range_tensor = torch.arange(ids.size(1), device=device).unsqueeze(0)
-        tailor_idx = tailor_idx.unsqueeze(1)
         tailor_idx = tailor_idx.unsqueeze(1).to(device)
         attention_mask = (range_tensor < tailor_idx).bool()
 
@@ -176,13 +175,7 @@ class Noether(nn.Module):
         loss = loss[:, :, 0]
         loss = loss * (attention_mask == 0)
         loss = loss.sum(axis=1) / torch.sum(attention_mask == 0, dim=-1)
-        # print(loss)
-        # print(tailor_idx)
-        # print("===")
-        # loss = loss[
-        #     batch_idx, pred_idx
-        # ]  # extract only the loss from the last time f step
-        # # usually we return logits, loss but for meta model we only care about loss?
+
         return {
             "logits": model_out["logits"].squeeze(1),
             "loss": torch.mean(loss),
@@ -200,10 +193,10 @@ class Noether(nn.Module):
         """
         inner_steps = self.inner_steps
         for _ in range(max_new_tokens):
-            if _ < 10:
-                self.inner_steps = 0
-            else:
-                self.inner_steps = inner_steps
+            # if _ < 10:
+            #     self.inner_steps = 0
+            # else:
+            #     self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
             idx_cond = (
                 idx
