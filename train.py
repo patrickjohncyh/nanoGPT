@@ -45,6 +45,7 @@ init_from = "scratch"  # 'scratch' or 'resume' or 'gpt2*',
 # Noehter settings
 is_noether = False
 inner_lr = 1e-3
+inner_steps = 1
 # wandb logging
 wandb_log = False  # disabled by default
 wandb_project = "owt"
@@ -147,6 +148,8 @@ def get_batch(split):
     else:
         data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
     ix = torch.randint(len(data) - block_size, (batch_size,))
+    tailor_idx = torch.randint(block_size - 1, (batch_size,)) + 1
+    # tailor_idx = torch.zeros((batch_size,))
     x = torch.stack(
         [torch.from_numpy((data[i : i + block_size]).astype(np.int64)) for i in ix]
     )
@@ -158,12 +161,14 @@ def get_batch(split):
     )
     if device_type == "cuda":
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y = x.pin_memory().to(device, non_blocking=True), y.pin_memory().to(
-            device, non_blocking=True
+        x, y, tailor_idx = (
+            x.pin_memory().to(device, non_blocking=True),
+            y.pin_memory().to(device, non_blocking=True),
+            tailor_idx.pin_memory().to(device, non_blocking=True),
         )
     else:
         x, y = x.to(device), y.to(device)
-    return x, y
+    return x, y, tailor_idx
 
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -241,7 +246,7 @@ if block_size < model.config.block_size:
 if is_noether:
     opt = torchopt.sgd(lr=inner_lr)
     mlp = MLPNoether(n_embd)
-    model = Noether(model, opt, mlp)
+    model = Noether(model, opt, mlp, inner_steps=inner_steps)
     # wrap model in nother
     print(model)
 
@@ -255,8 +260,13 @@ scaler = torch.cuda.amp.GradScaler(enabled=(dtype == "float16"))
 if is_noether:
     # grab  gpt model
     optimizer = model.model.configure_optimizers(
-        weight_decay, learning_rate, (beta1, beta2), device_type
+        weight_decay,
+        learning_rate,
+        (beta1, beta2),
+        device_type,
+        aux_params=list(model.g_model.parameters()),
     )
+
 else:
     optimizer = model.configure_optimizers(
         weight_decay, learning_rate, (beta1, beta2), device_type
@@ -284,9 +294,9 @@ def estimate_loss():
     for split in ["train", "val"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y = get_batch(split)
+            X, Y, tailor_idx = get_batch(split)
             with ctx:
-                model_out = model(X, Y)
+                model_out = model(X, Y, tailor_idx=tailor_idx)
                 logits = model_out["logits"]
                 loss = model_out["loss"]
             losses[k] = loss.item()
@@ -317,7 +327,7 @@ if wandb_log and master_process:
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
-X, Y = get_batch("train")  # fetch the very first batch
+X, Y, tailor_idx = get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model  # unwrap DDP container if needed
@@ -373,14 +383,14 @@ while True:
                 micro_step == gradient_accumulation_steps - 1
             )
         with ctx:
-            model_out = model(X, Y)
+            model_out = model(X, Y, tailor_idx=tailor_idx)
             logits = model_out["logits"]
             loss = model_out["loss"]
             loss = (
                 loss / gradient_accumulation_steps
             )  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = get_batch("train")
+        X, Y, tailor_idx = get_batch("train")
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient

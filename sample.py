@@ -17,6 +17,7 @@ init_from = (
 )
 is_noether = False
 inner_lr = 1e-3
+inner_steps = 1
 out_dir = "out"  # ignored if init_from is not 'resume'
 start = "\n"  # or "<|endoftext|>" or etc. Can also specify a file, use as: "FILE:prompt.txt"
 num_samples = 10  # number of samples to draw
@@ -64,7 +65,7 @@ if init_from == "resume":
     if is_noether:
         opt = torchopt.sgd(lr=inner_lr)
         mlp = MLPNoether(gptconf.n_embd)
-        model = Noether(model, opt, mlp)
+        model = Noether(model, opt, mlp, inner_steps=inner_steps)
     state_dict = checkpoint["model"]
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):

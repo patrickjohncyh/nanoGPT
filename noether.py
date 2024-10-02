@@ -13,33 +13,42 @@ class MLPNoether(nn.Module):
         super().__init__()
         self.gate = nn.Parameter(torch.zeros((1, n_embd)))
 
-    def forward(self, x):
+    def forward(self, x, attention_mask=None):
         x = x * F.sigmoid(self.gate)
 
-        return self.conservation_loss(x)
+        return self.conservation_loss(x, attention_mask)
 
-    def conservation_loss(self, x):
+    def conservation_loss(self, x, attention_mask):
         device = x.device
         bs = x.size(0)
-        seq_len = x.size(-1)
+        seq_len = x.size(-2)
+
+        if seq_len == 1:
+            return {"loss_ne": torch.tensor(0, device=device), "x_g": x}
+
         x_a = x[:, :-1, :]
         x_b = x[:, 1:, :]
-        # assert False
-        # attention_mask = attention_mask[:, 1:]
 
-        # indexing_mask = (attention_mask == 0).long()
-        loss = ((x_a - x_b) ** 2).sum((1, 2)) / seq_len  # loss per batch per element
+        attention_mask = attention_mask[None, 1:]
 
-        # loss = torch.scatter_add(
-        #     torch.zeros_like(loss, device=device),
-        #     dim=-1,
-        #     index=indexing_mask,
-        #     src=loss,
-        # )
-        # # div by seq len
-        # loss = loss / torch.sum(attention_mask, dim=-1)
+        indexing_mask = (attention_mask == 0).long()
+        loss = ((x_a - x_b) ** 2).sum(-1)  # loss per batch per element
+        # print(x)
+        # print(loss)
+        # print(loss.shape)
 
-        return {"loss_ne": loss.mean(dim=0), "x_g": x}
+        loss = torch.scatter_add(
+            torch.zeros_like(loss, device=device),
+            dim=-1,
+            index=indexing_mask,
+            src=loss,
+        )
+        # div by seq len
+        loss = loss / (torch.sum(attention_mask, dim=-1) + 1)
+
+        loss = loss[:, 0].mean(dim=0)
+
+        return {"loss_ne": loss, "x_g": x}
 
 
 class Noether(nn.Module):
@@ -59,7 +68,7 @@ class Noether(nn.Module):
         self.g_model = g_model
 
     def tailor_forward(self, params, params_g, grad: bool, **kwargs):
-        def loss(params, params_g, ids, targets, reduction):
+        def loss(params, params_g, ids, targets, attention_mask, reduction):
             # make prediction on input sequence first
             # logits, loss, x_pred
             model_out = torch.func.functional_call(
@@ -75,17 +84,16 @@ class Noether(nn.Module):
             # pass seq x into model_g, and compute conservation loss
             # loss_ne, x_g
             model_g_out = torch.func.functional_call(
-                self.g_model, params_g, (model_out["x_pred"])
+                self.g_model, params_g, (model_out["x_pred"], attention_mask)
             )
 
             return model_g_out["loss_ne"], {**model_out, **model_g_out}
 
         # grad is d_loss_ne/d_param
         grad = torch.func.grad(loss, has_aux=True) if grad else loss
-        grads, model_out = torch.vmap(grad, in_dims=(0, None, 0, 0, None))(
+        grads, model_out = torch.vmap(grad, in_dims=(0, None, 0, 0, 0, None))(
             params, params_g, *kwargs.values(), "mean"
         )
-
         return {
             "grads": grads if grad else None,
             "logits": model_out["logits"],
@@ -99,15 +107,18 @@ class Noether(nn.Module):
         self,
         ids,
         targets=None,
+        tailor_idx=None,
         # reduction="mean",
     ):
         bs = ids.size(0)
         seq_len = ids.size(1)
         device = ids.device
+        if tailor_idx == None:
+            tailor_idx = torch.ones(bs) * seq_len
 
         invalid = [
-            "wte",
-            "wpe",
+            # "wte",
+            # "wpe",
         ]
         # get model params and repeat bs times
         params = {
@@ -122,6 +133,12 @@ class Noether(nn.Module):
 
         # update model(s) for with N tailoring loss steps
         inner_step_grad_norm = 0
+
+        # convert tailor_idx to attention_mask
+        range_tensor = torch.arange(ids.size(1), device=device).unsqueeze(0)
+        tailor_idx = tailor_idx.unsqueeze(1)
+        attention_mask = (range_tensor < tailor_idx).bool()
+
         for i in range(self.inner_steps):
             # print(i)
             # grad is d_ether_loss/d_param
@@ -130,15 +147,13 @@ class Noether(nn.Module):
                 params,
                 params_g,
                 grad=True,
-                **dict(
-                    ids=ids,
-                    targets=targets,
-                ),
+                **dict(ids=ids, targets=targets, attention_mask=attention_mask),
             )
-
+            # grads = {k: torch.nan_to_num(v, 0.0) for k, v in model_out["grads"].items()}
             updates, state = self.optimizer.update(
                 model_out["grads"], state, inplace=False
             )
+
             params = torchopt.apply_updates(params, updates, inplace=False)
 
         # make prediction on updated model
@@ -147,22 +162,25 @@ class Noether(nn.Module):
             params,
             params_g,
             grad=False,
-            **dict(ids=ids, targets=targets),
+            **dict(ids=ids, targets=targets, attention_mask=attention_mask),
         )
 
-        # i think we want to compute loss only for last time step bcos we might leak info otherwise
+        # i think we want to compute loss only non-tailored inputs; i.e., where attention_mask==0
         # hence, recompute loss manually here : - (
-        # batch_idx = torch.tensor([_ for _ in range(bs)], device=device).long()
-        # pred_idx = torch.sum((attention_mask != 0), dim=-1) - 1
         loss = F.cross_entropy(
             model_out["logits"].view(-1, model_out["logits"].size(-1)),
             targets.view(-1),
             reduction="none",
         ).view(bs, seq_len, -1)
-        loss = loss[:, -1]
+        loss = loss[:, :, 0]
+        loss = loss * (attention_mask == 0)
+        loss = loss.sum(axis=1) / torch.sum(attention_mask == 0, dim=-1)
+        # print(loss)
+        # print(tailor_idx)
+        # print("===")
         # loss = loss[
         #     batch_idx, pred_idx
-        # ]  # extract only the loss from the last time step
+        # ]  # extract only the loss from the last time f step
         # # usually we return logits, loss but for meta model we only care about loss?
         return {
             "logits": model_out["logits"].squeeze(1),
