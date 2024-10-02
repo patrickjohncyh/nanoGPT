@@ -167,7 +167,8 @@ def get_batch(split):
             tailor_idx.pin_memory().to(device, non_blocking=True),
         )
     else:
-        x, y = x.to(device), y.to(device)
+        x, y, tailor_idx = x.to(device), y.to(device), tailor_idx.to(device)
+
     return x, y, tailor_idx
 
 
@@ -245,7 +246,7 @@ if block_size < model.config.block_size:
 
 if is_noether:
     opt = torchopt.sgd(lr=inner_lr)
-    mlp = MLPNoether(n_embd)
+    mlp = MLPNoether(model.config.n_embd)
     model = Noether(model, opt, mlp, inner_steps=inner_steps)
     # wrap model in nother
     print(model)
