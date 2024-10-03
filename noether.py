@@ -11,12 +11,16 @@ import torchopt
 class MLPNoether(nn.Module):
     def __init__(self, n_embd):
         super().__init__()
-        self.gate = nn.Parameter(torch.zeros((1, n_embd)))
+        self.fc1 = nn.Linear(n_embd, n_embd)
+        self.fc2 = nn.Linear(n_embd, 1)
 
     def forward(self, x, attention_mask=None):
-        x = x * F.sigmoid(self.gate)
-
-        return self.conservation_loss(x, attention_mask)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.fc2(x)
+        # regress to some score that we want to minimize
+        loss_ne = x[:, -1, 0].mean(dim=0)
+        return {"loss_ne": loss_ne, "x_g": x}
 
     def conservation_loss(self, x, attention_mask):
         device = x.device
