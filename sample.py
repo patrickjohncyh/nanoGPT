@@ -61,11 +61,16 @@ if init_from == "resume":
     ckpt_path = os.path.join(out_dir, "ckpt.pt")
     checkpoint = torch.load(ckpt_path, map_location=device)
     gptconf = GPTConfig(**checkpoint["model_args"])
-    model = GPT(gptconf)
+
+    # print(checkpoint['model']['model.transformer.wte.weight'].shape)
     if is_noether:
+        gptconf.vocab_size += 1
+        model = GPT(gptconf)
         opt = torchopt.sgd(lr=inner_lr)
         mlp = MLPNoether(gptconf.n_embd)
-        model = Noether(model, opt, mlp, inner_steps=inner_steps)
+        model = Noether(model, opt, mlp, inner_steps=inner_steps, resume=True)
+    else:
+        model = GPT(gptconf)
     state_dict = checkpoint["model"]
     unwanted_prefix = "_orig_mod."
     for k, v in list(state_dict.items()):

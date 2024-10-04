@@ -15,12 +15,25 @@ class MLPNoether(nn.Module):
         self.fc2 = nn.Linear(n_embd, 1)
 
     def forward(self, x, attention_mask=None):
-        x = self.fc1(x)
-        x = F.relu(x)
+        device = x.device
+
+        # x = self.fc1(x)
+        # x = F.relu(x)
         x = self.fc2(x)
-        # regress to some score that we want to minimize
-        loss_ne = x[:, -1, 0].mean(dim=0)
-        return {"loss_ne": loss_ne, "x_g": x}
+
+        range_tensor = torch.arange(x.size(1), device=device).unsqueeze(0)
+        thought_idx = attention_mask.sum(-1)
+        thought_mask = (range_tensor == thought_idx).long()
+
+        loss = torch.scatter_add(
+            torch.zeros_like(x[:, :, 0], device=device),
+            dim=-1,
+            index=thought_mask,
+            src=x[:, :, 0],
+        )
+        loss = loss[:, 1].mean(dim=0)
+
+        return {"loss_ne": loss, "x_g": x}
 
     def conservation_loss(self, x, attention_mask):
         device = x.device
@@ -63,6 +76,7 @@ class Noether(nn.Module):
         g_model,
         inner_steps: int = 1,
         inner_grad_clip: float = 0.0,
+        resume=False,
     ):
         super().__init__()
         self.model = model
@@ -70,9 +84,32 @@ class Noether(nn.Module):
         self.inner_steps = inner_steps  # tailor steps
         self.inner_grad_clip = inner_grad_clip
         self.g_model = g_model
+        if resume == False:
+            self.thought_token = self.model.config.vocab_size
+            self.update_model_embedding_table()
+        else:
+            self.thought_token = self.model.config.vocab_size - 1
+
+    def update_model_embedding_table(self):
+        thought_vector = torch.randn(1, self.model.config.n_embd)
+        gpt_weights = self.model.lm_head.weight
+        new_weights = torch.cat((gpt_weights, thought_vector), dim=0)
+
+        # update lm_head
+        lm_head_new = nn.Linear(
+            self.model.config.n_embd, self.model.config.vocab_size + 1, bias=False
+        )
+        lm_head_new.weight = nn.Parameter(new_weights)
+        self.model.lm_head = lm_head_new
+        # update embedding size
+        self.model.transformer.wte = nn.Embedding(
+            self.model.config.vocab_size + 1, self.model.config.n_embd
+        )
+        # update embedding weights
+        self.model.transformer.wte.weight = self.model.lm_head.weight
 
     def tailor_forward(self, params, params_g, grad: bool, **kwargs):
-        def loss(params, params_g, ids, targets, attention_mask, reduction):
+        def loss(params, params_g, ids, targets, attention_mask, reduction, grad):
             # make prediction on input sequence first
             # logits, loss, x_pred
             model_out = torch.func.functional_call(
@@ -93,10 +130,20 @@ class Noether(nn.Module):
 
             return model_g_out["loss_ne"], {**model_out, **model_g_out}
 
+        if grad:
+            bs = kwargs["ids"].size(0)
+            device = kwargs["ids"].device
+            thought_idx = torch.stack(
+                (torch.arange(end=bs, device=device), kwargs["attention_mask"].sum(-1))
+            ).long()
+            # slot in thought token id
+            kwargs["ids"] = torch.clone(kwargs["ids"])
+            kwargs["ids"][thought_idx[0], thought_idx[1]] = self.thought_token
+
         # grad is d_loss_ne/d_param
-        grad = torch.func.grad(loss, has_aux=True) if grad else loss
-        grads, model_out = torch.vmap(grad, in_dims=(0, None, 0, 0, 0, None))(
-            params, params_g, *kwargs.values(), "mean"
+        grad_fn = torch.func.grad(loss, has_aux=True) if grad else loss
+        grads, model_out = torch.vmap(grad_fn, in_dims=(0, None, 0, 0, 0, None, None))(
+            params, params_g, *kwargs.values(), "mean", grad
         )
         return {
             "grads": grads if grad else None,
@@ -118,7 +165,7 @@ class Noether(nn.Module):
         seq_len = ids.size(1)
         device = ids.device
         if tailor_idx == None:
-            tailor_idx = torch.ones(bs) * seq_len
+            tailor_idx = torch.ones(bs) * (seq_len - 1)
 
         invalid = [
             "wte",
@@ -196,23 +243,31 @@ class Noether(nn.Module):
         Most likely you'll want to make sure to be in model.eval() mode of operation for this.
         """
         inner_steps = self.inner_steps
+        device = idx.device
+
         for _ in range(max_new_tokens):
             if _ < 10:
                 self.inner_steps = 0
             else:
                 self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
+            # since we have a thought token ,we do block+size-1
             idx_cond = (
                 idx
-                if idx.size(1) <= self.model.config.block_size
-                else idx[:, -self.model.config.block_size :]
+                if idx.size(1) <= self.model.config.block_size - 1
+                else idx[:, -(self.model.config.block_size - 1) :]
             )
             # forward the model to get the logits for the index in the sequence
             # use dummmy targets
-            model_out = self(idx_cond, idx_cond)
+            idx_cond_with_thought_buffer = torch.cat(
+                (idx_cond, torch.LongTensor([[0]], device=device)), dim=-1
+            )
+            model_out = self(idx_cond_with_thought_buffer, idx_cond_with_thought_buffer)
             logits = model_out["logits"]
+
             # pluck the logits at the final step and scale by desired temperature
-            logits = logits[:, -1, :] / temperature
+            # since we are using a thought token buffer, we sample from the penultimate step
+            logits = logits[:, -2, :] / temperature
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))

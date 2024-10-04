@@ -249,7 +249,7 @@ if is_noether:
     mlp = MLPNoether(model.config.n_embd)
     model = Noether(model, opt, mlp, inner_steps=inner_steps)
     # wrap model in nother
-    print(model)
+    # print(model)
 
 
 model.to(device)
