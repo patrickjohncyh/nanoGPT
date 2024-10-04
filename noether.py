@@ -260,7 +260,7 @@ class Noether(nn.Module):
             # forward the model to get the logits for the index in the sequence
             # use dummmy targets
             idx_cond_with_thought_buffer = torch.cat(
-                (idx_cond, torch.Tensor([[0]], device=device.long())), dim=-1
+                (idx_cond, torch.tensor([[0]], device=device).long()), dim=-1
             )
             model_out = self(idx_cond_with_thought_buffer, idx_cond_with_thought_buffer)
             logits = model_out["logits"]
