@@ -122,9 +122,10 @@ with torch.no_grad():
     with ctx:
         for k in range(num_samples):
             y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            print(y)
             if is_noether:
-                for idx, token in enumerate(y):
+                for idx, token in enumerate(y[0]):
                     if token == 50257:
-                        y[idx] = 15751
+                        y[0, idx] = 15751
             print(decode(y[0].tolist()))
             print("---------------")
