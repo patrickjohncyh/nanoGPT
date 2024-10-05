@@ -251,10 +251,10 @@ class Noether(nn.Module):
         device = idx.device
 
         for _ in range(max_new_tokens):
-            # if _ < 10:
-            #     self.inner_steps = 0
-            # else:
-            #     self.inner_steps = inner_steps
+            if _ < 10:
+                self.inner_steps = 0
+            else:
+                self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
             # since we have a thought token ,we do block+size-1
             idx_cond = (
