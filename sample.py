@@ -86,6 +86,14 @@ model.to(device)
 if compile:
     model = torch.compile(model)  # requires PyTorch 2.0 (optional)
 
+
+def decode_noether(enc, l):
+    try:
+        return enc.decode(l)
+    except:
+        return "<TT>"
+
+
 # look for the meta pickle in case it is available in the dataset folder
 load_meta = False
 if (
@@ -108,7 +116,10 @@ else:
     print("No meta.pkl found, assuming GPT-2 encodings...")
     enc = tiktoken.get_encoding("gpt2")
     encode = lambda s: enc.encode(s, allowed_special={"<|endoftext|>"})
-    decode = lambda l: enc.decode(l)
+    if is_noether:
+        decode = lambda l: decode_noether(enc, l)
+    else:
+        decode = lambda l: enc.decode(l)
 
 # encode the beginning of the prompt
 if start.startswith("FILE:"):
