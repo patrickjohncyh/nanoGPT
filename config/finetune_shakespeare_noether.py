@@ -1,7 +1,7 @@
 import time
 
 is_noether = True
-inner_lr = 1e-5
+inner_lr = 3e-5
 inner_steps = 1
 
 out_dir = "out-shakespeare-noether"
@@ -22,7 +22,7 @@ always_save_checkpoint = False
 # shakespeare has 301,966 tokens, so 1 epoch ~= 9.2 iters
 batch_size = 12
 block_size = 1024
-gradient_accumulation_steps = 50
+gradient_accumulation_steps = 40
 max_iters = 20
 
 # finetune at constant LR
