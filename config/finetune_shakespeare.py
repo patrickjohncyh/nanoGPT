@@ -1,7 +1,7 @@
 import time
 
 out_dir = "out-shakespeare"
-eval_interval = 5
+eval_interval = 50
 eval_iters = 40
 wandb_log = False  # feel free to turn on
 wandb_project = "shakespeare"
@@ -19,7 +19,7 @@ always_save_checkpoint = False
 batch_size = 6
 block_size = 1024
 gradient_accumulation_steps = 40
-max_iters = 20
+max_iters = 200
 
 # finetune at constant LR
 learning_rate = 3e-5
