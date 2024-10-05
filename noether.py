@@ -87,8 +87,10 @@ class Noether(nn.Module):
         if resume == False:
             self.thought_token = self.model.config.vocab_size
             self.update_model_embedding_table()
+            print("NEW NOETHER MODEL: THOUGHT TOKEN = ", self.thought_token)
         else:
             self.thought_token = self.model.config.vocab_size - 1
+            print("RESUMED NOETHER MODEL: THOUGHT TOKEN = ", self.thought_token)
 
     def update_model_embedding_table(self):
         thought_vector = torch.randn(1, self.model.config.n_embd)
