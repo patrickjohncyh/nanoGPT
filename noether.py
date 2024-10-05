@@ -167,7 +167,7 @@ class Noether(nn.Module):
         seq_len = ids.size(1)
         device = ids.device
         if tailor_idx == None:
-            tailor_idx = torch.ones(bs) * (seq_len - 1)
+            tailor_idx = torch.ones(bs) * (seq_len - 2)
 
         invalid = [
             "wte",
