@@ -22,7 +22,7 @@ class MLPNoether(nn.Module):
         x = self.fc2(x)
 
         range_tensor = torch.arange(x.size(1), device=device).unsqueeze(0)
-        thought_idx = attention_mask.sum(-1)
+        thought_idx = attention_mask.sum(-1) + 1
         thought_mask = (range_tensor == thought_idx).long()
 
         loss = torch.scatter_add(
@@ -136,7 +136,10 @@ class Noether(nn.Module):
             bs = kwargs["ids"].size(0)
             device = kwargs["ids"].device
             thought_idx = torch.stack(
-                (torch.arange(end=bs, device=device), kwargs["attention_mask"].sum(-1))
+                (
+                    torch.arange(end=bs, device=device),
+                    kwargs["attention_mask"].sum(-1) + 1,
+                )
             ).long()
             # slot in thought token id
             kwargs["ids"] = torch.clone(kwargs["ids"])
@@ -167,7 +170,7 @@ class Noether(nn.Module):
         seq_len = ids.size(1)
         device = ids.device
         if tailor_idx == None:
-            tailor_idx = torch.ones(bs) * (seq_len - 2)
+            tailor_idx = torch.ones(bs) * (seq_len - 1)
 
         invalid = [
             "wte",
@@ -190,7 +193,7 @@ class Noether(nn.Module):
         # convert tailor_idx to attention_mask
         range_tensor = torch.arange(ids.size(1), device=device).unsqueeze(0)
         tailor_idx = tailor_idx.unsqueeze(1).to(device)
-        attention_mask = (range_tensor < tailor_idx).bool()
+        attention_mask = (range_tensor < (tailor_idx - 1)).bool()
 
         for i in range(self.inner_steps):
             # print(i)
@@ -248,10 +251,10 @@ class Noether(nn.Module):
         device = idx.device
 
         for _ in range(max_new_tokens):
-            if _ < 10:
-                self.inner_steps = 0
-            else:
-                self.inner_steps = inner_steps
+            # if _ < 10:
+            #     self.inner_steps = 0
+            # else:
+            #     self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
             # since we have a thought token ,we do block+size-1
             idx_cond = (
