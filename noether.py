@@ -160,6 +160,20 @@ class Noether(nn.Module):
             "x_pred": model_out["x_pred"],
         }
 
+    def compute_masked_loss(self, logits, targets, mask, mask_val):
+        bs = logits.size(0)
+        seq_len = logits.size(2)
+        loss = F.cross_entropy(
+            logits.view(-1, logits.size(-1)),
+            targets.view(-1),
+            reduction="none",
+        ).view(bs, seq_len, -1)
+        loss = loss[:, :, 0]
+        loss = loss * (mask == mask_val)
+        loss = loss.sum(axis=1)
+        num_loss_el = torch.sum(mask == mask_val, dim=-1)
+        return loss, num_loss_el
+
     def forward(
         self,
         ids,
@@ -196,6 +210,9 @@ class Noether(nn.Module):
         tailor_idx = tailor_idx.unsqueeze(1).to(device)
         attention_mask = (range_tensor < (tailor_idx - 1)).bool()
 
+        # save original model logits
+        original_logits = None
+
         for i in range(self.inner_steps):
             # print(i)
             # grad is d_ether_loss/d_param
@@ -210,6 +227,8 @@ class Noether(nn.Module):
             updates, state = self.optimizer.update(
                 model_out["grads"], state, inplace=False
             )
+            if i == 0:
+                original_logits = model_out["logits"]
 
             params = torchopt.apply_updates(params, updates, inplace=False)
 
@@ -224,14 +243,18 @@ class Noether(nn.Module):
 
         # i think we want to compute loss only non-tailored inputs; i.e., where attention_mask==0
         # hence, recompute loss manually here : - (
-        loss = F.cross_entropy(
-            model_out["logits"].view(-1, model_out["logits"].size(-1)),
-            targets.view(-1),
-            reduction="none",
-        ).view(bs, seq_len, -1)
-        loss = loss[:, :, 0]
-        loss = loss * (attention_mask == 0)
-        loss = loss.sum(axis=1) / torch.sum(attention_mask == 0, dim=-1)
+        loss, num_loss_el = self.compute_masked_loss(
+            model_out["logits"], targets, attention_mask, mask_val=0
+        )
+
+        if self.inner_steps > 0:
+            loss_original, num_loss_el_original = self.compute_masked_loss(
+                original_logits, targets, attention_mask, mask_val=1
+            )
+            loss += loss_original
+            num_loss_el += num_loss_el_original
+
+        loss = loss / num_loss_el
 
         return {
             "logits": model_out["logits"].squeeze(1),
