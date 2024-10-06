@@ -149,6 +149,7 @@ def get_batch(split):
         data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
     ix = torch.randint(len(data) - block_size, (batch_size,))
     tailor_idx = torch.randint(block_size - 1, (batch_size,)) + 1
+    tailor_idx[::2] = 1
     # tailor_idx = torch.zeros((batch_size,))
     x = torch.stack(
         [torch.from_numpy((data[i : i + block_size]).astype(np.int64)) for i in ix]
