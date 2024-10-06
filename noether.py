@@ -132,18 +132,18 @@ class Noether(nn.Module):
 
             return model_g_out["loss_ne"], {**model_out, **model_g_out}
 
-        if grad:
-            bs = kwargs["ids"].size(0)
-            device = kwargs["ids"].device
-            thought_idx = torch.stack(
-                (
-                    torch.arange(end=bs, device=device),
-                    kwargs["attention_mask"].sum(-1) + 1,
-                )
-            ).long()
-            # slot in thought token id
-            kwargs["ids"] = torch.clone(kwargs["ids"])
-            kwargs["ids"][thought_idx[0], thought_idx[1]] = self.thought_token
+        # if grad:
+        #     bs = kwargs["ids"].size(0)
+        #     device = kwargs["ids"].device
+        #     thought_idx = torch.stack(
+        #         (
+        #             torch.arange(end=bs, device=device),
+        #             kwargs["attention_mask"].sum(-1) + 1,
+        #         )
+        #     ).long()
+        #     # slot in thought token id
+        #     kwargs["ids"] = torch.clone(kwargs["ids"])
+        #     kwargs["ids"][thought_idx[0], thought_idx[1]] = self.thought_token
 
         # grad is d_loss_ne/d_param
         grad_fn = torch.func.grad(loss, has_aux=True) if grad else loss
