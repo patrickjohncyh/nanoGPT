@@ -18,7 +18,7 @@ class MLPNoether(nn.Module):
         device = x.device
 
         # x = self.fc1(x)
-        # x = F.relu(x)
+        x = F.relu(x)
         x = self.fc2(x)
 
         range_tensor = torch.arange(x.size(1), device=device).unsqueeze(0)
