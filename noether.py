@@ -188,8 +188,8 @@ class Noether(nn.Module):
             tailor_idx = torch.ones(bs) * (seq_len - 1)
 
         invalid = [
-            "wte",
-            "wpe",
+            # "wte",
+            # "wpe",
         ]
         # get model params and repeat bs times
         params = {
