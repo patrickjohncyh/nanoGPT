@@ -11,7 +11,7 @@ from datasets import load_dataset
 # print(data[0])
 # data = "\n".join(data)
 
-with open(os.path.join(os.path.dirname(__file__), "arithmetic.txt")) as f:
+with open(os.path.join(os.path.dirname(__file__), "addition.txt")) as f:
     data = f.read()
 
 chars = sorted(list(set(data)))
