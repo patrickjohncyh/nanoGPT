@@ -227,11 +227,13 @@ class Noether(nn.Module):
             updates, state = self.optimizer.update(
                 model_out["grads"], state, inplace=False
             )
+            # print(model_out["loss_ne"])
+            # print(model_out["logits"])
             if i == 0:
                 original_logits = model_out["logits"]
 
             params = torchopt.apply_updates(params, updates, inplace=False)
-
+        # print("===")
         # make prediction on updated model
         # _, (logits, loss, loss_ne, _)
         model_out = self.tailor_forward(
@@ -275,10 +277,10 @@ class Noether(nn.Module):
         device = idx.device
 
         for _ in range(max_new_tokens):
-            if _ < 10:
-                self.inner_steps = 0
-            else:
-                self.inner_steps = inner_steps
+            # if _ < 10:
+            #     self.inner_steps = 0
+            # else:
+            #     self.inner_steps = inner_steps
             # if the sequence context is growing too long we must crop it at block_size
             # since we have a thought token ,we do block+size-1
             idx_cond = (
