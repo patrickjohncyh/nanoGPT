@@ -13,7 +13,7 @@ from datasets import load_dataset
 
 with open(os.path.join(os.path.dirname(__file__), "addition.txt")) as f:
     data = f.readlines()
-    data = [_.strip() for _ in data]
+    data = [_ for _ in data]
 
 chars = sorted(list(set("\n".join(data))))
 print(chars)
