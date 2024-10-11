@@ -24,8 +24,7 @@ class MLPNoether(nn.Module):
         range_tensor = torch.arange(x.size(1), device=device).unsqueeze(0)
         thought_idx = attention_mask.sum(-1)
         thought_mask = (range_tensor == thought_idx).long()
-        print(thought_mask)
-        assert False
+
         loss = torch.scatter_add(
             torch.zeros_like(x[:, :, 0], device=device),
             dim=-1,
@@ -134,7 +133,6 @@ class Noether(nn.Module):
 
             return model_g_out["loss_ne"], {**model_out, **model_g_out}
 
-        print(kwargs["ids"])
         if grad:
             bs = kwargs["ids"].size(0)
             device = kwargs["ids"].device
@@ -147,7 +145,6 @@ class Noether(nn.Module):
             # slot in thought token id
             kwargs["ids"] = torch.clone(kwargs["ids"])
             kwargs["ids"][thought_idx[0], thought_idx[1]] = self.thought_token
-        print(kwargs["ids"])
 
         # grad is d_loss_ne/d_param
         grad_fn = torch.func.grad(loss, has_aux=True) if grad else loss
