@@ -243,7 +243,7 @@ class Noether(nn.Module):
             grad=False,
             **dict(ids=ids, targets=targets, attention_mask=attention_mask),
         )
-        if target_mask:
+        if type(target_mask) == type(None):
             # i think we want to compute loss only target_mask
             loss, num_loss_el = self.compute_masked_loss(
                 model_out["logits"], targets, target_mask, mask_val=1
