@@ -12,9 +12,10 @@ from datasets import load_dataset
 # data = "\n".join(data)
 
 with open(os.path.join(os.path.dirname(__file__), "addition.txt")) as f:
-    data = f.read()
+    data = f.readlines()
+    data = [_.strip() for _ in data]
 
-chars = sorted(list(set(data)))
+chars = sorted(list(set("\n".join(data))))
 print(chars)
 vocab_size = len(chars)
 print("all the unique characters:", "".join(chars))
@@ -23,6 +24,8 @@ print(f"vocab size: {vocab_size:,}")
 # create a mapping from characters to integers
 stoi = {ch: i for i, ch in enumerate(chars)}
 itos = {i: ch for i, ch in enumerate(chars)}
+
+print(itos)
 
 
 def encode(s):
@@ -40,18 +43,18 @@ n = len(data)
 train_data = data[: int(n * 0.9)]
 val_data = data[int(n * 0.9) :]
 
-train_ids = encode(train_data)
-val_ids = encode(val_data)
+train_ids = [np.array(encode(_)) for _ in train_data]
+val_ids = [np.array(encode(_)) for _ in val_data]
 
 # val_ids = enc.encode_ordinary(val_data)
-print(f"train has {len(train_ids):,} tokens")
-print(f"val has {len(val_ids):,} tokens")
+print(f"train has {len(train_ids):,} examples")
+print(f"val has {len(val_ids):,} examples")
 
 # export to bin files
-train_ids = np.array(train_ids, dtype=np.uint16)
-val_ids = np.array(val_ids, dtype=np.uint16)
-train_ids.tofile(os.path.join(os.path.dirname(__file__), "train.bin"))
-val_ids.tofile(os.path.join(os.path.dirname(__file__), "val.bin"))
+train_ids = np.array(train_ids, dtype=object)
+val_ids = np.array(val_ids, dtype=object)
+np.save(os.path.join(os.path.dirname(__file__), "train"), train_ids)
+np.save(os.path.join(os.path.dirname(__file__), "val"), val_ids)
 
 # save the meta information as well, to help us encode/decode later
 meta = {

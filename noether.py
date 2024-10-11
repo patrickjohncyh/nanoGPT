@@ -243,20 +243,20 @@ class Noether(nn.Module):
             grad=False,
             **dict(ids=ids, targets=targets, attention_mask=attention_mask),
         )
-
-        # i think we want to compute loss only target_mask
-        loss, num_loss_el = self.compute_masked_loss(
-            model_out["logits"], targets, target_mask, mask_val=1
-        )
-
+        if target_mask:
+            # i think we want to compute loss only target_mask
+            loss, num_loss_el = self.compute_masked_loss(
+                model_out["logits"], targets, target_mask, mask_val=1
+            )
+            loss = loss / num_loss_el
+        else:
+            loss = torch.tensor(0.0)
         # if self.inner_steps > 0:
         #     loss_original, num_loss_el_original = self.compute_masked_loss(
         #         original_logits, targets, attention_mask, mask_val=1
         #     )
         #     loss += loss_original
         #     num_loss_el += num_loss_el_original
-
-        loss = loss / num_loss_el
 
         return {
             "logits": model_out["logits"].squeeze(1),
