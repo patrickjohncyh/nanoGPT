@@ -113,7 +113,7 @@ else:
 # encode the beginning of the prompt
 if start.startswith("FILE:"):
     with open(start[5:], "r", encoding="utf-8") as f:
-        start = f.read()
+        start = f.read().strip()
 start_ids = encode(start)
 x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
 
