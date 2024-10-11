@@ -139,7 +139,7 @@ class Noether(nn.Module):
             thought_idx = torch.stack(
                 (
                     torch.arange(end=bs, device=device),
-                    kwargs["attention_mask"].sum(-1) + 1,
+                    kwargs["attention_mask"].sum(-1),
                 )
             ).long()
             # slot in thought token id
@@ -151,6 +151,7 @@ class Noether(nn.Module):
         grads, model_out = torch.vmap(grad_fn, in_dims=(0, None, 0, 0, 0, None, None))(
             params, params_g, *kwargs.values(), "mean", grad
         )
+        model_out["logits"] = model_out["logits"][:, 0]
         return {
             "grads": grads if grad else None,
             "logits": model_out["logits"],
@@ -162,13 +163,12 @@ class Noether(nn.Module):
 
     def compute_masked_loss(self, logits, targets, mask, mask_val):
         bs = logits.size(0)
-        seq_len = logits.size(2)
+        seq_len = logits.size(1)
         loss = F.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            targets.view(-1),
+            logits.reshape(-1, logits.size(-1)),
+            targets.reshape(-1),
             reduction="none",
-        ).view(bs, seq_len, -1)
-        loss = loss[:, :, 0]
+        ).view(bs, seq_len)
         loss = loss * (mask == mask_val)
         loss = loss.sum(axis=1)
         num_loss_el = torch.sum(mask == mask_val, dim=-1)
@@ -179,11 +179,13 @@ class Noether(nn.Module):
         ids,
         targets=None,
         tailor_idx=None,
+        target_mask=None,
         # reduction="mean",
     ):
         bs = ids.size(0)
         seq_len = ids.size(1)
         device = ids.device
+
         if tailor_idx == None:
             tailor_idx = torch.ones(bs) * (seq_len - 1)
 
@@ -233,8 +235,7 @@ class Noether(nn.Module):
                 original_logits = model_out["logits"]
 
             params = torchopt.apply_updates(params, updates, inplace=False)
-        # print("===")
-        # make prediction on updated model
+
         # _, (logits, loss, loss_ne, _)
         model_out = self.tailor_forward(
             params,
@@ -243,18 +244,17 @@ class Noether(nn.Module):
             **dict(ids=ids, targets=targets, attention_mask=attention_mask),
         )
 
-        # i think we want to compute loss only non-tailored inputs; i.e., where attention_mask==0
-        # hence, recompute loss manually here : - (
+        # i think we want to compute loss only target_mask
         loss, num_loss_el = self.compute_masked_loss(
-            model_out["logits"], targets, attention_mask, mask_val=0
+            model_out["logits"], targets, target_mask, mask_val=1
         )
 
-        if self.inner_steps > 0:
-            loss_original, num_loss_el_original = self.compute_masked_loss(
-                original_logits, targets, attention_mask, mask_val=1
-            )
-            loss += loss_original
-            num_loss_el += num_loss_el_original
+        # if self.inner_steps > 0:
+        #     loss_original, num_loss_el_original = self.compute_masked_loss(
+        #         original_logits, targets, attention_mask, mask_val=1
+        #     )
+        #     loss += loss_original
+        #     num_loss_el += num_loss_el_original
 
         loss = loss / num_loss_el
 

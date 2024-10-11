@@ -207,7 +207,7 @@ class GPT(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, idx, targets=None, **kwargs):
+    def forward(self, idx, targets=None, target_mask=None, **kwargs):
         device = idx.device
         b, t = idx.size()
         assert (

@@ -143,37 +143,63 @@ data_dir = os.path.join("data", dataset)
 def get_batch(split):
     # We recreate np.memmap every batch to avoid a memory leak, as per
     # https://stackoverflow.com/questions/45132940/numpy-memmap-memory-usage-want-to-iterate-once/61472122#61472122
-    if split == "train":
-        data = np.memmap(os.path.join(data_dir, "train.bin"), dtype=np.uint16, mode="r")
-    else:
-        data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
-    splits = np.split(data, np.where(data == 0)[0])[1:]
-    np.random.shuffle(splits)
-    data = np.concatenate(splits)
+    # if split == "train":
+    #     data = np.memmap(os.path.join(data_dir, "train.bin"), dtype=np.uint16, mode="r")
+    # else:
+    #     data = np.memmap(os.path.join(data_dir, "val.bin"), dtype=np.uint16, mode="r")
 
-    ix = torch.randint(len(data) - block_size, (batch_size,))
-    tailor_idx = torch.randint(block_size - 1, (batch_size,)) + 1
-    # tailor_idx = torch.zeros((batch_size,))
-    x = torch.stack(
-        [torch.from_numpy((data[i : i + block_size]).astype(np.int64)) for i in ix]
-    )
-    y = torch.stack(
+    if split == "train":
+        data = np.load(os.path.join(data_dir, "train.npy"), allow_pickle=True)
+    else:
+        data = np.load(os.path.join(data_dir, "val.npy"), allow_pickle=True)
+
+    ix = np.random.randint(0, len(data), (batch_size,))
+    # un-padded
+    x = data[ix]
+    len_x = [len(_) for _ in x]
+    max_len = max(len_x)
+    tailor_idx = torch.tensor([np.where(_ == 12)[0][0] + 1 for _ in x])
+    target_mask = torch.stack(
         [
-            torch.from_numpy((data[i + 1 : i + 1 + block_size]).astype(np.int64))
-            for i in ix
+            torch.cat(
+                (
+                    torch.zeros(idx),
+                    torch.ones(l - idx),
+                    torch.zeros(max_len - l),
+                )
+            )
+            for idx, l in zip(tailor_idx, len_x)
         ]
-    )
+    )[:,1:]
+    x_padded = torch.stack(
+        [
+            torch.cat(
+                (torch.from_numpy(_.astype(np.int64)), torch.zeros(max_len - len(_)))
+            )
+            for _ in x
+        ]
+    ).long()
+
+    x = x_padded[:, :-1]
+    y = x_padded[:, 1:]
+
     if device_type == "cuda":
         # pin arrays x,y, which allows us to move them to GPU asynchronously (non_blocking=True)
-        x, y, tailor_idx = (
+        x, y, tailor_idx, target_mask = (
             x.pin_memory().to(device, non_blocking=True),
             y.pin_memory().to(device, non_blocking=True),
             tailor_idx.pin_memory().to(device, non_blocking=True),
+            target_mask.pin_memory().to(device, non_blocking=True),
         )
     else:
-        x, y, tailor_idx = x.to(device), y.to(device), tailor_idx.to(device)
+        x, y, tailor_idx, target_mask = (
+            x.to(device),
+            y.to(device),
+            tailor_idx.to(device),
+            target_mask.to(device),
+        )
 
-    return x, y, tailor_idx
+    return x, y, tailor_idx, target_mask
 
 
 # init these up here, can override if init_from='resume' (i.e. from a checkpoint)
@@ -299,9 +325,9 @@ def estimate_loss():
     for split in ["train", "val"]:
         losses = torch.zeros(eval_iters)
         for k in range(eval_iters):
-            X, Y, tailor_idx = get_batch(split)
+            X, Y, tailor_idx, target_mask = get_batch(split)
             with ctx:
-                model_out = model(X, Y, tailor_idx=tailor_idx)
+                model_out = model(X, Y, tailor_idx=tailor_idx, target_mask=target_mask)
                 logits = model_out["logits"]
                 loss = model_out["loss"]
             losses[k] = loss.item()
@@ -332,7 +358,7 @@ if wandb_log and master_process:
     wandb.init(project=wandb_project, name=wandb_run_name, config=config)
 
 # training loop
-X, Y, tailor_idx = get_batch("train")  # fetch the very first batch
+X, Y, tailor_idx, target_mask = get_batch("train")  # fetch the very first batch
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model  # unwrap DDP container if needed
@@ -388,14 +414,14 @@ while True:
                 micro_step == gradient_accumulation_steps - 1
             )
         with ctx:
-            model_out = model(X, Y, tailor_idx=tailor_idx)
+            model_out = model(X, Y, tailor_idx=tailor_idx, target_mask=target_mask)
             logits = model_out["logits"]
             loss = model_out["loss"]
             loss = (
                 loss / gradient_accumulation_steps
             )  # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y, tailor_idx = get_batch("train")
+        X, Y, tailor_idx, target_mask = get_batch("train")
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
