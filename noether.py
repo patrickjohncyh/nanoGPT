@@ -275,7 +275,7 @@ class Noether(nn.Module):
         """
         inner_steps = self.inner_steps
         device = idx.device
-
+        p = 1
         for _ in range(max_new_tokens):
             # if _ < 10:
             #     self.inner_steps = 0
@@ -307,8 +307,12 @@ class Noether(nn.Module):
             probs = F.softmax(logits, dim=-1)
             # sample from the distribution
             # idx_next = torch.multinomial(probs, num_samples=1)
+
             idx_next = torch.argmax(probs)[None, None]
+            max_prob = torch.max(probs)
+            p = p * max_prob
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
 
+        print(p)
         return idx
